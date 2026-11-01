@@ -92,7 +92,10 @@
   const SKY_AWAY = [-0.151, -0.124, -0.087];
   const SUN = [0.293, 0.227, 0.17];
 
-  const DPR_CAP = 2.5;
+  const DPR_CAP = 3;
+  // Never render below 2x: the robot is a small fixed-size canvas, so a 2x
+  // supersample is cheap here and removes the soft/blurry edges on 1x screens.
+  const MIN_RENDER_SCALE = 2;
   const PIXEL_BUDGET = 2.6e6;
   const LEVELS = [1, 0.85, 0.72, 0.6];
 
@@ -424,12 +427,12 @@
           float t = 24.0;
           float tEnd = 36.0;
           float hitAt = s == 0 ? 0.25 : 0.4;
-          int steps = s == 0 ? 80 : 35;
+          int steps = s == 0 ? 96 : 40;
           float rmin = 1e9, near = 1e9, prevR = 1e9;
           vec2 hitD = vec2(0.0, 1.0);
 
           if (tEnd > t) {
-              for (int i = 0; i < 80; i++) {
+              for (int i = 0; i < 96; i++) {
                   if (i >= steps) break;
                   vec2 dd = sceneD(uW2S * (ro + rd * t), true);
                   float d = dd.x * uScale;
@@ -606,6 +609,10 @@
   return function createClayRobot(host, canvas, userOptions) {
     if (!host || !canvas) return null;
 
+    const user = userOptions || {};
+    // Merge nested option groups instead of replacing them, so any key the caller
+    // omits (e.g. response.hop) keeps its default. A missing numeric default would
+    // turn uHop into NaN and paint the whole canvas opaque black during the hop.
     const opts = Object.assign({
       scale: 100,
       walk: true,
@@ -617,7 +624,12 @@
       response: Object.assign({}, DEFAULT_RESPONSE),
       advanced: Object.assign({}, DEFAULT_ADVANCED),
       placement: { x: 0, y: 0, angle: 0, tilt: 0 },
-    }, userOptions || {});
+    }, user, {
+      colors: Object.assign({}, DEFAULT_COLORS, user.colors),
+      response: Object.assign({}, DEFAULT_RESPONSE, user.response),
+      advanced: Object.assign({}, DEFAULT_ADVANCED, user.advanced),
+      placement: Object.assign({ x: 0, y: 0, angle: 0, tilt: 0 }, user.placement),
+    });
 
     let disposed = false;
     let raf = 0;
@@ -711,7 +723,7 @@
     function applySize() {
       if (!gl) return;
       const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
-      let k = dpr * Math.min(Math.max(shown, 1), 2);
+      let k = Math.min(Math.max(dpr, MIN_RENDER_SCALE), DPR_CAP) * Math.min(Math.max(shown, 1), 2);
       const area = layoutW * layoutH * k * k;
       if (area > PIXEL_BUDGET) k *= Math.sqrt(PIXEL_BUDGET / area);
       k *= LEVELS[level];
@@ -783,7 +795,7 @@
     }
 
     function triggerHop() {
-      if (reduceMotion || opts.response.hop <= 0) return;
+      if (reduceMotion || !(opts.response.hop > 0)) return;
       const h = hopAt >= 0 ? clock - hopAt : 1e9;
       if (h > HOP_CROUCH + HOP_AIR) hopAt = clock;
       joyAt = clock;
